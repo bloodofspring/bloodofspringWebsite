@@ -374,27 +374,33 @@
     }
 
     async function setRandomBackground() {
-        const maxAttempts = Math.min(imageUrls.length, 10);
-        let selectedImage = null;
-        for (let i = 0; i < maxAttempts; i++) {
-            const candidate = chooseNextImageUrl();
-            if (!candidate) break;
-            if (candidate === selectedImage) continue;
-            selectedImage = candidate;
-            try {
-                currentImageEl = await loadImage(selectedImage);
-                currentImageSize = {width: currentImageEl.naturalWidth, height: currentImageEl.naturalHeight};
-                currentImageUrl = selectedImage;
-                rememberRecent(selectedImage);
-                const {bgUrl, tileMode} = await computeBgUrl(selectedImage, currentImageSize, currentImageEl);
-                renderBackgroundCrossfadeWithOptions(bgUrl, tileMode, {sharp: true});
-                return;
-            } catch {
-                badImageUrls.add(selectedImage);
+        if (setRandomBackground._inFlight) return;
+        setRandomBackground._inFlight = true;
+        try {
+            const maxAttempts = Math.min(imageUrls.length, 10);
+            let selectedImage = null;
+            for (let i = 0; i < maxAttempts; i++) {
+                const candidate = chooseNextImageUrl();
+                if (!candidate) break;
+                if (candidate === selectedImage) continue;
+                selectedImage = candidate;
+                try {
+                    currentImageEl = await loadImage(selectedImage);
+                    currentImageSize = {width: currentImageEl.naturalWidth, height: currentImageEl.naturalHeight};
+                    currentImageUrl = selectedImage;
+                    rememberRecent(selectedImage);
+                    const {bgUrl, tileMode} = await computeBgUrl(selectedImage, currentImageSize, currentImageEl);
+                    renderBackgroundCrossfadeWithOptions(bgUrl, tileMode, {sharp: true});
+                    return;
+                } catch {
+                    badImageUrls.add(selectedImage);
+                }
             }
-        }
 
-        document.body.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5))`;
+            document.body.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5))`;
+        } finally {
+            setRandomBackground._inFlight = false;
+        }
     }
 
     let resizeTimer = null;
@@ -412,6 +418,12 @@
         // Show the last image immediately (usually cached) to avoid a flash on refresh.
         applyInitialBackgroundFromStorage();
         void setRandomBackground();
+
+        // Auto-rotate background every 7 seconds (skip when tab is hidden).
+        window.setInterval(() => {
+            if (document.hidden) return;
+            void setRandomBackground();
+        }, 7000);
     });
 </script>
 </body>
