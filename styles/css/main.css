@@ -1,0 +1,80 @@
+body {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-family: Didot, monospace;
+    font-size: 2em;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-attachment: fixed;
+
+    transition: background-image 1s ease-in-out;
+
+    position: relative;
+}
+
+.content-wrapper {
+    text-align: center;
+    padding: 20px 30px;
+    border-radius: 15px;
+    max-width: 80%;
+
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+
+    position: relative;
+    z-index: 1;
+
+    b {
+        color: #E6CDFF;
+    }
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background: radial-gradient(
+            circle at center,
+            rgba(0, 0, 0, 0) 0%,
+            rgba(0, 0, 0, 0) 45%,
+            rgba(0, 0, 0, 0.55) 100%
+    );
+}
+
+body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+
+    mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, 1) 100%);
+    -webkit-mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0) 20%, rgba(0, 0, 0, 1) 100%);
+}
+
+.content-wrapper h1 {
+    font-size: 70px;
+}
+
+h1 {
+    margin-top: 0;
+    font-size: 1.8em;
+}
+
+p {
+    margin-bottom: 0;
+    font-size: 0.8em;
+    line-height: 1.5;
+}

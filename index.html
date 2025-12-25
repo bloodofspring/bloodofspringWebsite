@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="styles/css/main.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiSSiKk - home</title>
+</head>
+<body>
+
+<div class="content-wrapper">
+    <h1>LiSSiKk</h1>
+    <p><b>L</b>ogic <b>I</b>ntegral <b>S</b>atisfaction <b>S</b>pirit <b>S</b>ntelligence <b>K</b>een <b>k</b>nowledge
+    </p>
+</div>
+
+<script>
+    const IMAGE_NUMBER_MIN = 1;
+    const IMAGE_NUMBER_MAX = 45;
+    const IMAGE_NUMBER_PAD = 2;
+
+    const DEFAULT_IMAGE_EXT = 'JPG';
+    const IMAGE_EXT_BY_NUMBER = {
+        4: 'PNG',
+    };
+
+    const RECENT_IMAGES_LIMIT = 10;
+
+    function buildImageUrl(num) {
+        const nn = String(num).padStart(IMAGE_NUMBER_PAD, '0');
+        const ext = IMAGE_EXT_BY_NUMBER[num] || DEFAULT_IMAGE_EXT;
+        return `static/img${nn}.${ext}`;
+    }
+
+    const imageUrls = Array.from(
+        {length: IMAGE_NUMBER_MAX - IMAGE_NUMBER_MIN + 1},
+        (_, i) => buildImageUrl(IMAGE_NUMBER_MIN + i)
+    );
+
+    let currentImageUrl = null;
+    let currentImageSize = null;
+    let currentImageEl = null;
+
+    const tileUrlCache = new Map();
+    const recentImageUrls = [];
+    const badImageUrls = new Set();
+
+    const STORAGE_KEYS = {
+        recent: 'lissikk:recentImageUrls:v1',
+        last: 'lissikk:lastImageUrl:v1',
+    };
+
+    function safeStorageGet(key) {
+        try {
+            return window.localStorage.getItem(key);
+        } catch {
+            return null;
+        }
+    }
+
+    function safeStorageSet(key, value) {
+        try {
+            window.localStorage.setItem(key, value);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    function loadStateFromStorage() {
+        const recentRaw = safeStorageGet(STORAGE_KEYS.recent);
+        if (recentRaw) {
+            try {
+                const parsed = JSON.parse(recentRaw);
+                if (Array.isArray(parsed)) {
+                    const filtered = parsed.filter((u) => typeof u === 'string' && imageUrls.includes(u));
+                    recentImageUrls.splice(0, recentImageUrls.length, ...filtered.slice(0, RECENT_IMAGES_LIMIT));
+                }
+            } catch {
+            }
+        }
+    }
+
+    function persistStateToStorage() {
+        safeStorageSet(STORAGE_KEYS.recent, JSON.stringify(recentImageUrls.slice(0, RECENT_IMAGES_LIMIT)));
+        safeStorageSet(STORAGE_KEYS.last, recentImageUrls[0] || '');
+    }
+
+    function rememberRecent(url) {
+        const idx = recentImageUrls.indexOf(url);
+        if (idx !== -1) recentImageUrls.splice(idx, 1);
+        recentImageUrls.unshift(url);
+        if (recentImageUrls.length > RECENT_IMAGES_LIMIT) recentImageUrls.length = RECENT_IMAGES_LIMIT;
+        persistStateToStorage();
+    }
+
+    function chooseNextImageUrl() {
+        const available = imageUrls.filter((u) => !badImageUrls.has(u));
+        if (!available.length) return null;
+
+        const lastFromStorage = safeStorageGet(STORAGE_KEYS.last);
+        const lastShown = (recentImageUrls[0] || lastFromStorage || null);
+        const avoid = new Set([currentImageUrl, lastShown].filter(Boolean));
+
+        const preferred = available.filter((u) => !avoid.has(u) && !recentImageUrls.includes(u));
+        const pool1 = preferred.length ? preferred : available.filter((u) => !avoid.has(u));
+        const pool = pool1.length ? pool1 : available;
+
+        return pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    function isViewportLandscape() {
+        return window.innerWidth >= window.innerHeight;
+    }
+
+    function loadImage(url) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = url;
+        });
+    }
+
+    function canvasToBlobUrl(canvas) {
+        return new Promise((resolve, reject) => {
+            canvas.toBlob((blob) => {
+                if (!blob) return reject(new Error('Failed to create blob'));
+                resolve(URL.createObjectURL(blob));
+            }, 'image/png');
+        });
+    }
+
+    async function getSeamlessTileUrl(img, axis) {
+        const key = `${img.src}|${axis}`;
+        const cached = tileUrlCache.get(key);
+        if (cached) return cached;
+
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = axis === 'x' || axis === 'xy' ? w * 2 : w;
+        canvas.height = axis === 'y' || axis === 'xy' ? h * 2 : h;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('No 2D context');
+
+        // (0,0) original
+        ctx.drawImage(img, 0, 0, w, h);
+
+        if (axis === 'x') {
+            ctx.translate(w * 2, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(img, 0, 0, w, h);
+        } else {
+            ctx.translate(0, h * 2);
+            ctx.scale(1, -1);
+            ctx.drawImage(img, 0, 0, w, h);
+        }
+        ctx.restore();
+
+        const blobUrl = await canvasToBlobUrl(canvas);
+        tileUrlCache.set(key, blobUrl);
+        return blobUrl;
+    }
+
+    async function applyBackground(imageUrl, imageSize, imageEl) {
+        const gradient = 'linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5))';
+        const isPortraitImage = imageSize.height > imageSize.width;
+        const viewportLandscape = isViewportLandscape();
+        const tileByX = viewportLandscape && isPortraitImage;
+        const tileByY = !viewportLandscape && !isPortraitImage;
+
+        let bgUrl = imageUrl;
+        if ((tileByX || tileByY) && imageEl) {
+            const axis = tileByX ? 'x' : 'y';
+            bgUrl = await getSeamlessTileUrl(imageEl, axis);
+        }
+
+        document.body.style.backgroundImage = `${gradient}, url('${bgUrl}')`;
+        document.body.style.backgroundAttachment = 'fixed, fixed';
+
+        if (tileByX) {
+            document.body.style.backgroundSize = 'cover, auto 100%';
+            document.body.style.backgroundRepeat = 'no-repeat, repeat-x';
+            document.body.style.backgroundPosition = 'center center, center center';
+        } else if (tileByY) {
+            document.body.style.backgroundSize = 'cover, 100% auto';
+            document.body.style.backgroundRepeat = 'no-repeat, repeat-y';
+            document.body.style.backgroundPosition = 'center center, center center';
+        } else {
+            document.body.style.backgroundSize = 'cover';
+            document.body.style.backgroundRepeat = 'no-repeat';
+            document.body.style.backgroundPosition = 'center center';
+        }
+    }
+
+    async function setRandomBackground() {
+        const maxAttempts = Math.min(imageUrls.length, 10);
+        let selectedImage = null;
+        for (let i = 0; i < maxAttempts; i++) {
+            const candidate = chooseNextImageUrl();
+            if (!candidate) break;
+            if (candidate === selectedImage) continue;
+            selectedImage = candidate;
+            try {
+                currentImageEl = await loadImage(selectedImage);
+                currentImageSize = {width: currentImageEl.naturalWidth, height: currentImageEl.naturalHeight};
+                currentImageUrl = selectedImage;
+                rememberRecent(selectedImage);
+                await applyBackground(selectedImage, currentImageSize, currentImageEl);
+                return;
+            } catch {
+                badImageUrls.add(selectedImage);
+            }
+        }
+
+        document.body.style.backgroundImage = `linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5))`;
+    }
+
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+        if (!currentImageUrl || !currentImageSize) return;
+        window.clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(() => {
+            void applyBackground(currentImageUrl, currentImageSize, currentImageEl);
+        }, 100);
+    });
+
+    window.addEventListener('load', () => {
+        loadStateFromStorage();
+        void setRandomBackground();
+    });
+</script>
+</body>
+</html>
