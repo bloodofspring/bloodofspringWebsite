@@ -22,7 +22,8 @@ body {
     pointer-events: none;
     z-index: 0;
     opacity: 0;
-    transition: opacity 220ms ease-in-out;
+    filter: blur(14px);
+    transition: opacity 420ms ease-in-out, filter 420ms ease-in-out;
 
     background-size: cover;
     background-repeat: no-repeat;
@@ -32,6 +33,10 @@ body {
 
 .bg-layer.is-visible {
     opacity: 1;
+}
+
+.bg-layer.is-sharp {
+    filter: blur(0);
 }
 
 .content-wrapper {

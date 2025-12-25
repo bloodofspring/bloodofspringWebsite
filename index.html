@@ -94,20 +94,20 @@
     }
 
     function setBackgroundStyles(targetEl, bgUrl, tileMode) {
-        const gradient = 'linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5))';
-        targetEl.style.backgroundImage = `${gradient}, url('${bgUrl}')`;
-        targetEl.style.backgroundAttachment = 'fixed, fixed';
+        // No dark overlay here; blur/fade is handled by CSS on .bg-layer.
+        targetEl.style.backgroundImage = `url('${bgUrl}')`;
+        targetEl.style.backgroundAttachment = 'fixed';
 
         if (tileMode === 'x') {
-            targetEl.style.backgroundSize = 'cover, auto 100%';
-            targetEl.style.backgroundRepeat = 'no-repeat, repeat-x';
-            targetEl.style.backgroundPosition = 'center center, center center';
+            targetEl.style.backgroundSize = 'auto 100%';
+            targetEl.style.backgroundRepeat = 'repeat-x';
+            targetEl.style.backgroundPosition = 'center center';
             return;
         }
         if (tileMode === 'y') {
-            targetEl.style.backgroundSize = 'cover, 100% auto';
-            targetEl.style.backgroundRepeat = 'no-repeat, repeat-y';
-            targetEl.style.backgroundPosition = 'center center, center center';
+            targetEl.style.backgroundSize = '100% auto';
+            targetEl.style.backgroundRepeat = 'repeat-y';
+            targetEl.style.backgroundPosition = 'center center';
             return;
         }
 
@@ -127,14 +127,24 @@
         return null;
     }
 
-    function crossfadeTo(bgUrl, tileMode) {
+    function tileServiceAvailable() {
+        // Works only when SW is actually controlling the page (usually after first reload).
+        return !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+    }
+
+    function tileServiceUrl(src, axis) {
+        return `__tile?src=${encodeURIComponent(src)}&axis=${encodeURIComponent(axis)}`;
+    }
+
+    function crossfadeTo(bgUrl, tileMode, {sharp = true} = {}) {
         if (!bgVisibleLayer || !bgHiddenLayer) return false;
 
         setBackgroundStyles(bgHiddenLayer, bgUrl, tileMode);
+        setLayerSharp(bgHiddenLayer, !!sharp);
+        bgHiddenLayer.classList.add('is-visible');
 
         // next frame: swap opacity classes (prevents any intermediate blank)
         requestAnimationFrame(() => {
-            bgHiddenLayer.classList.add('is-visible');
             bgVisibleLayer.classList.remove('is-visible');
             const tmp = bgVisibleLayer;
             bgVisibleLayer = bgHiddenLayer;
@@ -149,21 +159,38 @@
     }
 
     function renderBackgroundImmediate(bgUrl, tileMode) {
+        // Default: immediate render but keep current layer's "sharp" state untouched.
+        // (We explicitly set sharpness below.)
+        return renderBackgroundImmediateWithOptions(bgUrl, tileMode, {sharp: true});
+    }
+
+    function setLayerSharp(el, sharp) {
+        if (!el) return;
+        if (sharp) el.classList.add('is-sharp');
+        else el.classList.remove('is-sharp');
+    }
+
+    function renderBackgroundImmediateWithOptions(bgUrl, tileMode, {sharp}) {
         const key = makeBgKey(bgUrl, tileMode);
         if (key === bgRenderedKey) return;
 
         const target = bgVisibleLayer || document.body;
         setBackgroundStyles(target, bgUrl, tileMode);
         if (bgVisibleLayer) bgVisibleLayer.classList.add('is-visible');
+        if (bgVisibleLayer) setLayerSharp(bgVisibleLayer, !!sharp);
         bgRenderedKey = key;
     }
 
     function renderBackgroundCrossfade(bgUrl, tileMode) {
+        return renderBackgroundCrossfadeWithOptions(bgUrl, tileMode, {sharp: true});
+    }
+
+    function renderBackgroundCrossfadeWithOptions(bgUrl, tileMode, {sharp}) {
         const key = makeBgKey(bgUrl, tileMode);
         if (key === bgRenderedKey) return;
 
-        if (!crossfadeTo(bgUrl, tileMode)) {
-            renderBackgroundImmediate(bgUrl, tileMode);
+        if (!crossfadeTo(bgUrl, tileMode, {sharp})) {
+            renderBackgroundImmediateWithOptions(bgUrl, tileMode, {sharp});
             return;
         }
         bgRenderedKey = key;
@@ -171,7 +198,11 @@
 
     function applyQuickBackground(imageUrl, imageSize) {
         const tileMode = computeTileMode(imageSize);
-        renderBackgroundImmediate(imageUrl, tileMode);
+        // "Stub" background:
+        // - keep it blurred
+        // - but if SW tile endpoint is available, use the same mirrored/seamless tile as the final render
+        const url = (tileMode && tileServiceAvailable()) ? tileServiceUrl(imageUrl, tileMode) : imageUrl;
+        renderBackgroundImmediateWithOptions(url, tileMode, {sharp: false});
     }
 
     function applyInitialBackgroundFromStorage() {
@@ -203,7 +234,7 @@
                 persistLastMeta(url, size);
                 const {bgUrl, tileMode} = await computeBgUrl(url, size, img);
                 // If seamless URL differs (blob), crossfade it in; if identical, do nothing (prevents "re-apply" flash).
-                renderBackgroundCrossfade(bgUrl, tileMode);
+                renderBackgroundCrossfadeWithOptions(bgUrl, tileMode, {sharp: true});
             } catch {
             }
         })(), 250);
@@ -321,10 +352,15 @@
 
     async function computeBgUrl(imageUrl, imageSize, imageEl) {
         const tileMode = computeTileMode(imageSize);
+        // Prefer SW tile endpoint so placeholder and final rendering match perfectly across reloads.
+        if ((tileMode === 'x' || tileMode === 'y') && tileServiceAvailable()) {
+            return {bgUrl: tileServiceUrl(imageUrl, tileMode), tileMode};
+        }
+
+        // Fallback: client-side canvas tile (no persistence across reloads).
         let bgUrl = imageUrl;
         if ((tileMode === 'x' || tileMode === 'y') && imageEl) {
-            const axis = tileMode;
-            bgUrl = await getSeamlessTileUrl(imageEl, axis);
+            bgUrl = await getSeamlessTileUrl(imageEl, tileMode);
         }
         return {bgUrl, tileMode};
     }
@@ -351,7 +387,7 @@
                 currentImageUrl = selectedImage;
                 rememberRecent(selectedImage);
                 const {bgUrl, tileMode} = await computeBgUrl(selectedImage, currentImageSize, currentImageEl);
-                renderBackgroundCrossfade(bgUrl, tileMode);
+                renderBackgroundCrossfadeWithOptions(bgUrl, tileMode, {sharp: true});
                 return;
             } catch {
                 badImageUrls.add(selectedImage);
