@@ -58,6 +58,7 @@
     const bgLayerB = document.getElementById('bg-layer-b');
     let bgVisibleLayer = bgLayerA;
     let bgHiddenLayer = bgLayerB;
+    let bgRenderedKey = null; // `${tileMode}|${bgUrl}`
 
     const tileUrlCache = new Map();
     const recentImageUrls = [];
@@ -143,11 +144,34 @@
         return true;
     }
 
+    function makeBgKey(bgUrl, tileMode) {
+        return `${tileMode || ''}|${bgUrl}`;
+    }
+
+    function renderBackgroundImmediate(bgUrl, tileMode) {
+        const key = makeBgKey(bgUrl, tileMode);
+        if (key === bgRenderedKey) return;
+
+        const target = bgVisibleLayer || document.body;
+        setBackgroundStyles(target, bgUrl, tileMode);
+        if (bgVisibleLayer) bgVisibleLayer.classList.add('is-visible');
+        bgRenderedKey = key;
+    }
+
+    function renderBackgroundCrossfade(bgUrl, tileMode) {
+        const key = makeBgKey(bgUrl, tileMode);
+        if (key === bgRenderedKey) return;
+
+        if (!crossfadeTo(bgUrl, tileMode)) {
+            renderBackgroundImmediate(bgUrl, tileMode);
+            return;
+        }
+        bgRenderedKey = key;
+    }
+
     function applyQuickBackground(imageUrl, imageSize) {
         const tileMode = computeTileMode(imageSize);
-        const target = bgVisibleLayer || document.body;
-        setBackgroundStyles(target, imageUrl, tileMode);
-        if (bgVisibleLayer) bgVisibleLayer.classList.add('is-visible');
+        renderBackgroundImmediate(imageUrl, tileMode);
     }
 
     function applyInitialBackgroundFromStorage() {
@@ -169,7 +193,7 @@
         if (metaUrl === url && metaSize) currentImageSize = metaSize;
 
         // Upgrade to seamless tiling in background (won't override if a new image got chosen).
-        void (async () => {
+        window.setTimeout(() => void (async () => {
             try {
                 const img = await loadImage(url);
                 const size = {width: img.naturalWidth, height: img.naturalHeight};
@@ -177,10 +201,12 @@
                 currentImageEl = img;
                 currentImageSize = size;
                 persistLastMeta(url, size);
-                await applyBackgroundTo(bgVisibleLayer || document.body, url, size, img);
+                const {bgUrl, tileMode} = await computeBgUrl(url, size, img);
+                // If seamless URL differs (blob), crossfade it in; if identical, do nothing (prevents "re-apply" flash).
+                renderBackgroundCrossfade(bgUrl, tileMode);
             } catch {
             }
-        })();
+        })(), 250);
     }
 
     function safeStorageSet(key, value) {
@@ -306,6 +332,9 @@
     async function applyBackgroundTo(targetEl, imageUrl, imageSize, imageEl) {
         const {bgUrl, tileMode} = await computeBgUrl(imageUrl, imageSize, imageEl);
         setBackgroundStyles(targetEl, bgUrl, tileMode);
+        if (targetEl === bgVisibleLayer || (!bgVisibleLayer && targetEl === document.body)) {
+            bgRenderedKey = makeBgKey(bgUrl, tileMode);
+        }
     }
 
     async function setRandomBackground() {
@@ -322,9 +351,7 @@
                 currentImageUrl = selectedImage;
                 rememberRecent(selectedImage);
                 const {bgUrl, tileMode} = await computeBgUrl(selectedImage, currentImageSize, currentImageEl);
-                if (!crossfadeTo(bgUrl, tileMode)) {
-                    setBackgroundStyles(document.body, bgUrl, tileMode);
-                }
+                renderBackgroundCrossfade(bgUrl, tileMode);
                 return;
             } catch {
                 badImageUrls.add(selectedImage);
