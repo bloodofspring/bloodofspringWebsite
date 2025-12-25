@@ -5,6 +5,10 @@
     <link rel="stylesheet" href="styles/css/main.css">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LiSSiKk - home</title>
+    <!-- Prevent white flash before CSS/JS applies the background -->
+    <style>
+        html, body { background: #000; }
+    </style>
 </head>
 <body>
 
@@ -61,6 +65,23 @@
             return window.localStorage.getItem(key);
         } catch {
             return null;
+        }
+    }
+
+    function applyQuickBackground(imageUrl) {
+        const gradient = 'linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5))';
+        document.body.style.backgroundImage = `${gradient}, url('${imageUrl}')`;
+        document.body.style.backgroundAttachment = 'fixed, fixed';
+        document.body.style.backgroundSize = 'cover';
+        document.body.style.backgroundRepeat = 'no-repeat';
+        document.body.style.backgroundPosition = 'center center';
+    }
+
+    function applyInitialBackgroundFromStorage() {
+        const lastFromStorage = safeStorageGet(STORAGE_KEYS.last);
+        if (lastFromStorage && imageUrls.includes(lastFromStorage)) {
+            applyQuickBackground(lastFromStorage);
+            currentImageUrl = lastFromStorage;
         }
     }
 
@@ -236,6 +257,8 @@
 
     window.addEventListener('load', () => {
         loadStateFromStorage();
+        // Show the last image immediately (usually cached) to avoid a flash on refresh.
+        applyInitialBackgroundFromStorage();
         void setRandomBackground();
     });
 </script>
