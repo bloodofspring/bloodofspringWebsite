@@ -12,6 +12,9 @@
 </head>
 <body>
 
+<div id="bg-layer-a" class="bg-layer is-visible"></div>
+<div id="bg-layer-b" class="bg-layer"></div>
+
 <div class="content-wrapper">
     <h1>LiSSiKk</h1>
     <p><b>L</b>ogic <b>I</b>ntegral <b>S</b>atisfaction <b>S</b>pirit <b>S</b>ntelligence <b>K</b>een <b>k</b>nowledge
@@ -51,6 +54,11 @@
     let currentImageSize = null;
     let currentImageEl = null;
 
+    const bgLayerA = document.getElementById('bg-layer-a');
+    const bgLayerB = document.getElementById('bg-layer-b');
+    let bgVisibleLayer = bgLayerA;
+    let bgHiddenLayer = bgLayerB;
+
     const tileUrlCache = new Map();
     const recentImageUrls = [];
     const badImageUrls = new Set();
@@ -58,6 +66,7 @@
     const STORAGE_KEYS = {
         recent: 'lissikk:recentImageUrls:v1',
         last: 'lissikk:lastImageUrl:v1',
+        lastMeta: 'lissikk:lastImageMeta:v1', // { url, width, height }
     };
 
     function safeStorageGet(key) {
@@ -68,21 +77,110 @@
         }
     }
 
-    function applyQuickBackground(imageUrl) {
+    function safeJsonParse(raw) {
+        if (!raw) return null;
+        try {
+            return JSON.parse(raw);
+        } catch {
+            return null;
+        }
+    }
+
+    function persistLastMeta(url, size) {
+        if (!url || !size) return;
+        if (typeof size.width !== 'number' || typeof size.height !== 'number') return;
+        safeStorageSet(STORAGE_KEYS.lastMeta, JSON.stringify({url, width: size.width, height: size.height}));
+    }
+
+    function setBackgroundStyles(targetEl, bgUrl, tileMode) {
         const gradient = 'linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5))';
-        document.body.style.backgroundImage = `${gradient}, url('${imageUrl}')`;
-        document.body.style.backgroundAttachment = 'fixed, fixed';
-        document.body.style.backgroundSize = 'cover';
-        document.body.style.backgroundRepeat = 'no-repeat';
-        document.body.style.backgroundPosition = 'center center';
+        targetEl.style.backgroundImage = `${gradient}, url('${bgUrl}')`;
+        targetEl.style.backgroundAttachment = 'fixed, fixed';
+
+        if (tileMode === 'x') {
+            targetEl.style.backgroundSize = 'cover, auto 100%';
+            targetEl.style.backgroundRepeat = 'no-repeat, repeat-x';
+            targetEl.style.backgroundPosition = 'center center, center center';
+            return;
+        }
+        if (tileMode === 'y') {
+            targetEl.style.backgroundSize = 'cover, 100% auto';
+            targetEl.style.backgroundRepeat = 'no-repeat, repeat-y';
+            targetEl.style.backgroundPosition = 'center center, center center';
+            return;
+        }
+
+        targetEl.style.backgroundSize = 'cover';
+        targetEl.style.backgroundRepeat = 'no-repeat';
+        targetEl.style.backgroundPosition = 'center center';
+    }
+
+    function computeTileMode(imageSize) {
+        if (!imageSize || typeof imageSize.width !== 'number' || typeof imageSize.height !== 'number') return null;
+        const isPortraitImage = imageSize.height > imageSize.width;
+        const viewportLandscape = isViewportLandscape();
+        const tileByX = viewportLandscape && isPortraitImage;
+        const tileByY = !viewportLandscape && !isPortraitImage;
+        if (tileByX) return 'x';
+        if (tileByY) return 'y';
+        return null;
+    }
+
+    function crossfadeTo(bgUrl, tileMode) {
+        if (!bgVisibleLayer || !bgHiddenLayer) return false;
+
+        setBackgroundStyles(bgHiddenLayer, bgUrl, tileMode);
+
+        // next frame: swap opacity classes (prevents any intermediate blank)
+        requestAnimationFrame(() => {
+            bgHiddenLayer.classList.add('is-visible');
+            bgVisibleLayer.classList.remove('is-visible');
+            const tmp = bgVisibleLayer;
+            bgVisibleLayer = bgHiddenLayer;
+            bgHiddenLayer = tmp;
+        });
+
+        return true;
+    }
+
+    function applyQuickBackground(imageUrl, imageSize) {
+        const tileMode = computeTileMode(imageSize);
+        const target = bgVisibleLayer || document.body;
+        setBackgroundStyles(target, imageUrl, tileMode);
+        if (bgVisibleLayer) bgVisibleLayer.classList.add('is-visible');
     }
 
     function applyInitialBackgroundFromStorage() {
+        const meta = safeJsonParse(safeStorageGet(STORAGE_KEYS.lastMeta));
+        const metaUrl = meta && typeof meta.url === 'string' ? meta.url : null;
+        const metaW = meta && typeof meta.width === 'number' ? meta.width : null;
+        const metaH = meta && typeof meta.height === 'number' ? meta.height : null;
+        const metaSize = (metaW && metaH) ? {width: metaW, height: metaH} : null;
+
         const lastFromStorage = safeStorageGet(STORAGE_KEYS.last);
-        if (lastFromStorage && imageUrls.includes(lastFromStorage)) {
-            applyQuickBackground(lastFromStorage);
-            currentImageUrl = lastFromStorage;
-        }
+        const url = (metaUrl && imageUrls.includes(metaUrl))
+            ? metaUrl
+            : (lastFromStorage && imageUrls.includes(lastFromStorage) ? lastFromStorage : null);
+
+        if (!url) return;
+
+        applyQuickBackground(url, metaUrl === url ? metaSize : null);
+        currentImageUrl = url;
+        if (metaUrl === url && metaSize) currentImageSize = metaSize;
+
+        // Upgrade to seamless tiling in background (won't override if a new image got chosen).
+        void (async () => {
+            try {
+                const img = await loadImage(url);
+                const size = {width: img.naturalWidth, height: img.naturalHeight};
+                if (currentImageUrl !== url) return;
+                currentImageEl = img;
+                currentImageSize = size;
+                persistLastMeta(url, size);
+                await applyBackgroundTo(bgVisibleLayer || document.body, url, size, img);
+            } catch {
+            }
+        })();
     }
 
     function safeStorageSet(key, value) {
@@ -111,6 +209,9 @@
     function persistStateToStorage() {
         safeStorageSet(STORAGE_KEYS.recent, JSON.stringify(recentImageUrls.slice(0, RECENT_IMAGES_LIMIT)));
         safeStorageSet(STORAGE_KEYS.last, recentImageUrls[0] || '');
+        if (recentImageUrls[0] && currentImageUrl === recentImageUrls[0] && currentImageSize) {
+            persistLastMeta(currentImageUrl, currentImageSize);
+        }
     }
 
     function rememberRecent(url) {
@@ -192,35 +293,19 @@
         return blobUrl;
     }
 
-    async function applyBackground(imageUrl, imageSize, imageEl) {
-        const gradient = 'linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5))';
-        const isPortraitImage = imageSize.height > imageSize.width;
-        const viewportLandscape = isViewportLandscape();
-        const tileByX = viewportLandscape && isPortraitImage;
-        const tileByY = !viewportLandscape && !isPortraitImage;
-
+    async function computeBgUrl(imageUrl, imageSize, imageEl) {
+        const tileMode = computeTileMode(imageSize);
         let bgUrl = imageUrl;
-        if ((tileByX || tileByY) && imageEl) {
-            const axis = tileByX ? 'x' : 'y';
+        if ((tileMode === 'x' || tileMode === 'y') && imageEl) {
+            const axis = tileMode;
             bgUrl = await getSeamlessTileUrl(imageEl, axis);
         }
+        return {bgUrl, tileMode};
+    }
 
-        document.body.style.backgroundImage = `${gradient}, url('${bgUrl}')`;
-        document.body.style.backgroundAttachment = 'fixed, fixed';
-
-        if (tileByX) {
-            document.body.style.backgroundSize = 'cover, auto 100%';
-            document.body.style.backgroundRepeat = 'no-repeat, repeat-x';
-            document.body.style.backgroundPosition = 'center center, center center';
-        } else if (tileByY) {
-            document.body.style.backgroundSize = 'cover, 100% auto';
-            document.body.style.backgroundRepeat = 'no-repeat, repeat-y';
-            document.body.style.backgroundPosition = 'center center, center center';
-        } else {
-            document.body.style.backgroundSize = 'cover';
-            document.body.style.backgroundRepeat = 'no-repeat';
-            document.body.style.backgroundPosition = 'center center';
-        }
+    async function applyBackgroundTo(targetEl, imageUrl, imageSize, imageEl) {
+        const {bgUrl, tileMode} = await computeBgUrl(imageUrl, imageSize, imageEl);
+        setBackgroundStyles(targetEl, bgUrl, tileMode);
     }
 
     async function setRandomBackground() {
@@ -236,7 +321,10 @@
                 currentImageSize = {width: currentImageEl.naturalWidth, height: currentImageEl.naturalHeight};
                 currentImageUrl = selectedImage;
                 rememberRecent(selectedImage);
-                await applyBackground(selectedImage, currentImageSize, currentImageEl);
+                const {bgUrl, tileMode} = await computeBgUrl(selectedImage, currentImageSize, currentImageEl);
+                if (!crossfadeTo(bgUrl, tileMode)) {
+                    setBackgroundStyles(document.body, bgUrl, tileMode);
+                }
                 return;
             } catch {
                 badImageUrls.add(selectedImage);
@@ -251,7 +339,8 @@
         if (!currentImageUrl || !currentImageSize) return;
         window.clearTimeout(resizeTimer);
         resizeTimer = window.setTimeout(() => {
-            void applyBackground(currentImageUrl, currentImageSize, currentImageEl);
+            const target = bgVisibleLayer || document.body;
+            void applyBackgroundTo(target, currentImageUrl, currentImageSize, currentImageEl);
         }, 100);
     });
 

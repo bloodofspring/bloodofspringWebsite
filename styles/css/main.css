@@ -11,14 +11,27 @@ body {
     font-size: 2em;
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
 
+    /* Body background is just a fallback; real background is drawn in .bg-layer */
+
+    position: relative;
+}
+
+.bg-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0;
+    transition: opacity 220ms ease-in-out;
+
     background-size: cover;
     background-repeat: no-repeat;
     background-position: center center;
     background-attachment: fixed;
+}
 
-    transition: background-image 1s ease-in-out;
-
-    position: relative;
+.bg-layer.is-visible {
+    opacity: 1;
 }
 
 .content-wrapper {
@@ -30,7 +43,7 @@ body {
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
 
     position: relative;
-    z-index: 1;
+    z-index: 2;
 
     b {
         color: #E6CDFF;
@@ -42,7 +55,7 @@ body::before {
     position: fixed;
     inset: 0;
     pointer-events: none;
-    z-index: 0;
+    z-index: 1;
     background: radial-gradient(
             circle at center,
             rgba(0, 0, 0, 0) 0%,
@@ -56,7 +69,7 @@ body::after {
     position: fixed;
     inset: 0;
     pointer-events: none;
-    z-index: 0;
+    z-index: 1;
 
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
